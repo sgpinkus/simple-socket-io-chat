@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Simple Chat</title>
+    <meta charset='utf-8' />
+    <script src="https://unpkg.com/axios/dist/axios.min.js"></script>
+    <style>
+    * { border: 0; padding: 0; margin: 0; }
+    html, body { height: 100%; box-sizing: border-box; }
+    body { display:flex; flex-flow: column wrap; }
+    header, footer { background-color: #888; max-height: 40px; min-height: 0; }
+    header, footer { text-align: center; padding: 0.2em; }
+    .main-container-container { flex: 1; margin: auto auto; border: solid 1px #000; width:100%; max-width: 1280px; align-items: stretch; }
+    .main-container { display:flex; flex-flow: column wrap; height: 100%; }
+    .messages-container { flex: 1; display:flex; flex-flow: row wrap;}
+    .messages { flex: 1; width: 100%; overflow-y: scroll; }
+    .users { padding: 0 0.5em; margin: 0; }
+    .input-container { max-height: 40px; min-height: 1.5em; display:flex; flex-flow: row nowrap; }
+    .input { flex: 1; }
+    .messages, .users { border: solid 1px #000; }
+    .users, .messages { list-style-type: none; list-style-position: outside; }
+    .message-username { padding-right: 0.5em; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <p><a href='/'>&lt;Awesome Chat&gt;</a></p>
+    </header>
+    <div id='app' class='main-container-container'></div>
+    <footer>
+      <p><a href='/logout'>logout</a></p>
+    </footer>
+    <script src='/socket.io/socket.io.js'></script>
+    <script src="https://unpkg.com/react@16/umd/react.development.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@16/umd/react-dom.development.js" crossorigin></script>
+    <script src="https://unpkg.com/babel-standalone@6/babel.min.js"></script>
+    <script type="text/babel">
+
+    function Message(props) {
+      let {timestamp, user, message, to} = props.message;
+      if(to) {
+        return <li className='message' >
+          <span>{new Date(timestamp).toLocaleTimeString()}</span>&nbsp;<Nick user={user} /> -> <Nick user={to} />:&nbsp;<span className='message-body'>{message}</span>
+        </li>
+      }
+      else {
+        return <li className='message' >
+          <span>{new Date(timestamp).toLocaleTimeString()}</span>&nbsp;<Nick user={user} />:&nbsp;<span className='message-body'>{message}</span>
+        </li>
+      }
+    }
+
+    function Nick(props) {
+      return <strong style={{ color: props.user.color }}>@{props.user.nick}</strong>
+    }
+
+    function UserStatus(props) {
+      return <li className='user-status'><Nick user={props.user} /></li>
+    }
+
+    class App extends React.Component {
+      constructor(props) {
+        super(props);
+        console.log('App init');
+        this.state = {
+          user: {nick: '-', color: '#000'},
+          message: '',
+          users: [],
+          messages: [],
+        };
+        this.handleSubmit = this.handleSubmit.bind(this);
+        this.handleChange = this.handleChange.bind(this);
+        this.onSocketConnect = this.onSocketConnect.bind(this);
+        this.onSocketDisconnect = this.onSocketDisconnect.bind(this);
+        this.onSocketError = this.onSocketError.bind(this);
+        this.onSocketUpdate = this.onSocketUpdate.bind(this);
+        this.onSocketChatMessage = this.onSocketChatMessage.bind(this);
+        this.socket = io();
+        this.socket.on('connect', this.onSocketConnect);
+        this.socket.on('disconnect', this.onSocketDisconnect);
+        this.socket.on('error', this.onSocketError);
+        this.socket.on('update', this.onSocketUpdate);
+        this.socket.on('chat message', this.onSocketChatMessage);
+        this.pingTimer = setInterval(() => this.ping(), 10000);
+      }
+
+      render() {
+        const messageListItems = this.state.messages.map((message, index) => <Message message={message} key={index} />)
+        const userListItems = this.state.users.map((user) => <UserStatus user={user} key={user.nick} />)
+        return (
+          <div className='main-container'>
+            <div className='messages-container'>
+              <ol className='messages' id='messages'>{messageListItems}</ol>
+              <ol className='users'>{userListItems}</ol>
+            </div>
+            <form className='input-container' action='' onSubmit={this.handleSubmit}>
+              <strong><Nick user={this.state.user} />:&nbsp;</strong>
+              <input
+                type='text'
+                value={this.state.message}
+                onChange={this.handleChange}
+                className='input'
+                autoComplete='off'
+                minLength='1'
+                maxLength='1000'
+                required
+                autoFocus
+              />
+            </form>
+          </div>
+        );
+      }
+
+      componentDidMount() {
+      }
+
+      componentWillUnmount() {
+        clearInterval(this.pingTimer);
+      }
+
+      handleSubmit(e) {
+        e.preventDefault(); // prevents page reloading
+        let dmMatch = /^\s*@(\w+)\s+(.+)/.exec(this.state.message)
+        if(dmMatch) {
+          this.socket.emit('direct message', {nick: dmMatch[1], message: dmMatch[2]});
+        }
+        else {
+          this.socket.emit('chat message', this.state.message);
+        }
+        this.setState({message: ''})
+      }
+
+      handleChange(e) {
+        this.setState({message: e.target.value});
+        return true;
+      }
+
+      onSocketConnect(data) {
+        console.log('connected');
+      }
+
+      onSocketDisconnect(data) {
+        console.log('disconnected');
+        setTimeout(() => window.location = '/', 2000);
+      }
+
+      onSocketError(data) {
+        console.error('Socket Error:', data);
+      }
+
+      onSocketUpdate(data) {
+        console.log('update:', data);
+        console.log(this.state);
+        this.setState(data);
+      }
+
+      onSocketChatMessage(data) {
+        console.log('chat message:', data);
+        let messages = this.state.messages
+        messages.push(data);
+        messages = messages.slice(-1000, messages.length)
+        this.setState({messages: messages});
+      }
+
+      ping() {
+        axios.get('/ping').then((res) => console.debug(`ping: ${res.data}`)).catch((err) => console.log(err))
+      }
+    }
+
+    ReactDOM.render(<App />, document.getElementById('app'));
+
+    </script>
+  </body>
+</html>

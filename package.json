@@ -1,0 +1,23 @@
+{
+  "name": "socket-io-test",
+  "version": "1.0.0",
+  "description": "Does what ~WebSockets does but degrades to alternatives mechanism when WS is not available. Actually it's a level above WS providing a simple protocol for pub/sub like communications, connection lifecycle management and keepalive. Main features:",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "body-parser": "^1.19.0",
+    "connect-redis": "^4.0.3",
+    "express": "^4.17.1",
+    "express-session": "^1.17.0",
+    "handlebars": "^4.5.3",
+    "morgan": "^1.9.1",
+    "nodemon": "^2.0.2",
+    "redis": "^2.8.0",
+    "socket.io": "^2.3.0"
+  }
+}
