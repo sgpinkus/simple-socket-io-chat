@@ -81,7 +81,7 @@
         this.socket.on('error', this.onSocketError);
         this.socket.on('update', this.onSocketUpdate);
         this.socket.on('chat message', this.onSocketChatMessage);
-        this.pingTimer = setInterval(() => this.ping(), 10000);
+        this.pingTimer = setInterval(() => this.ping(), 15000);
       }
 
       render() {

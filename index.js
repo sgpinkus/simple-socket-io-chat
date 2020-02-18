@@ -6,6 +6,7 @@ const { Server } = require('http');
 const SocketIO = require('socket.io'); // https://github.com/socketio/socket.io/blob/master/docs/README.md
 const morgan = require('morgan');
 const BodyParser = require('body-parser');
+const CookieParser = require('cookie-parser')
 const Redis = require('redis'); // https://github.com/NodeRedis/node_redis
 require('bluebird').promisifyAll(Redis); // Monkey patches xxxAsync() for all xxx() -- https://github.com/NodeRedis/node_redis
 const Handlebars = require('handlebars');
@@ -22,7 +23,7 @@ const session = Session({
   resave: true,
   rolling: true, // Reset max age with each new client request.
   saveUninitialized: true,
-  cookie: { maxAge: 30000 }}
+  cookie: { maxAge: 7000 }}
 );
 const templates = {
   login: Handlebars.compile(fs.readFileSync(__dirname + '/login.html').toString()),
@@ -30,7 +31,7 @@ const templates = {
 let messageBuffer = [];
 
 /**
- * Hacky inefficient way of establishing list of logged in users based on enumerating sessions.
+ * Inefficient way of establishing list of logged in users by enumerating sessions.
  */
 const users = new class {
   constructor(sessionStore) {
@@ -51,7 +52,7 @@ const users = new class {
     return (await this.getUsers()).map((v) => v.nick)
   }
 
-  async getUser(nick) {
+  async getUserByNick(nick) {
     return (await this.getUsers()).filter((v) => v.nick == nick)[0]
   }
 }(sessionStore)
@@ -175,29 +176,59 @@ async function login(req, io) {
  * \/socket.io path.
  *
  * Sessions: We can access the Express session in a socket but the session middleware isn't invoked
- * the same as in Express. In particular, the stored session in Redis may disappear and the session
- * would be expired according to Express handler, while the session object attached to the socket
- * still exists, and as far as the connection is concerned the session is still valid. If the conn-
- * ection still exists then that is good enough and we just treat the session as valid. Touching the
- * session from a socket callback does not seem to work. Has to be done via Express.
+ * the same as in Express, and it's dodgy. So using custom session access based off express-session
+ * cookie (ignoring signature).
  **************************************************************************************************/
 
 const io = SocketIO(server, {
   pingInterval: 10000,
   pingTimeout: 5000,
 });
-io.use((socket, next) => session(socket.request, {}, next));
-io.use(logConnection)
-io.use(authenticateConnection)
+const cookieParser = CookieParser();
+io.use((socket, next) => cookieParser(socket.request, {}, next));
+io.use(setSession);
+io.use(authenticateConnection);
 io.on('connection', (socket) => {
   console.log('new socket connection');
-  socket.request.session.socket_id = socket.id;
-  socket.request.session.save();
+  socket.use((packet, next) => cookieParser(socket.request, {}, next));
+  socket.use((packet, next) => setSession(socket, next));
+  socket.use((packet, next) => authenticateConnection(socket, next));
   socket.on('chat message', (message) => chatMessage(socket, message));
   socket.on('direct message', (message) => directMessage(socket, message));
   socket.on('disconnect', (data, next) => { console.log('socket disconnected'); });
   initSocket(socket);
 });
+
+
+async function setSession(socket, next) {
+  try {
+    const sessionId = /s:([^.]+)\.(.*)$/.exec(socket.request.cookies['connect.sid'])[1]
+    console.log('Found sid', sessionId);
+    const session = await new Promise((resolve, reject) => {
+      sessionStore.get(sessionId, (err, session) => {
+        if(err) reject(err);
+        resolve(session);
+      });
+    });
+    console.log('Found session', session);
+    socket.request.session = session;
+    next();
+  }
+  catch(err) {
+    console.error('Could not set session');
+    next(err);
+  }
+}
+
+
+function saveSession(socket) {
+  const sessionId = /s:([^.]+)\.(.*)$/.exec(socket.request.cookies['connect.sid'])[1]
+  sessionStore.set(sessionId, socket.request.session, (err) => {
+    if(err) throw new Error(err);
+    console.log('Saved session');
+  });
+}
+
 
 /**
  * Session based authentication of the connection on connection establishment. Auth is not checked with
@@ -211,15 +242,16 @@ function authenticateConnection(socket, next) {
   }
   else {
     console.log(`${socket.request.session.nick} is logged in`);
-    console.log(socket.request.session)
     next()
   }
 }
+
 
 function logConnection(socket, next) {
   console.log(`socket.io request: path=${socket.request.path}, auth=${socket.request.session.auth}`)
   next()
 }
+
 
 async function initSocket(socket) {
   const user = { nick: socket.request.session.nick, color: socket.request.session.color };
@@ -229,11 +261,12 @@ async function initSocket(socket) {
   }
 }
 
+
 function chatMessage(socket, data) {
   let session = socket.request.session;
   console.log(`chat message: @${session.nick}: ${data}`);
-  socket.request.session.chat_count = socket.request.session.chat_count ? socket.request.session.chat_count + 1 : 1;
-  socket.request.session.save()
+  session.chat_count = session.chat_count ? session.chat_count + 1 : 1;
+  saveSession(socket);
   if(data.length == 0) {
     io.emit('error', Error('Message has length of 0'));
   }
@@ -244,7 +277,7 @@ function chatMessage(socket, data) {
     let payload = {
       message: data,
       timestamp: new Date().getTime(),
-      user: { nick: socket.request.session.nick, color: socket.request.session.color },
+      user: { nick: session.nick, color: session.color },
     }
     messageBuffer.push(payload);
     messageBuffer = messageBuffer.slice(-3, messageBuffer.length);
@@ -252,14 +285,15 @@ function chatMessage(socket, data) {
   }
 }
 
+
 async function directMessage(socket, data) {
   let session = socket.request.session;
   console.log(`direct message: @${session.nick}:`, data);
-  socket.request.session.dm_count = socket.request.session.dm_count ? socket.request.session.dm_count + 1 : 1;
-  socket.request.session.save()
+  session.dm_count = session.dm_count ? session.dm_count + 1 : 1;
+  saveSession(socket);
   try {
     let {nick, message} = data;
-    let user = (await users.getUser(nick))
+    let user = (await users.getUserByNick(nick))
     if(!user) {
       throw new Error('User does not exist')
     }

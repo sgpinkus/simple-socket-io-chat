@@ -26,15 +26,46 @@ This is a simple chat app developed as a personal learning aid following on from
 
 ## Implementation Notes
 
+### Sessions
+In this app, the *web* manages the login and establishes the session. *Only* the web can create a valid session and *only* the web (or indirectly an expiration timer in the session store) can destroy it. But a socket connection know nothing about sessions implicitly, and the WS connection outlive the web session potentially indefinitely. The WS connection should respect the web session, not allowing access unless there is a valid login session. This has to be checked with *every* packet (just like it has to be checked with every web request).
+
+        .-----.               .-----.
+        | Web | <-----------> | API |
+        '-----'               |     |
+                              |     |
+            .-----.           |     |
+            | WS  | <-------> |     |
+            '-----'           '-----'
+
+Alt 1: [SO suggested a ~trick][so1] for using `expressjs-session` session middleware with socket.io:
+
+    const Session = require('express-session'); // https://github.com/expressjs/session
+    const session = Session({...})
+    io.use((socket, next) => session(socket.request, {}, next));
+
+But this doesn't actually seem work. If your Express application uses the session (~any HTTP request) the session that gets attached to the socket request object by the middleware seems to get detached from the actual storage.
+
+Alt 2: Tried calling `Session.reload(callback)` with *every* socket request:
+
+      socket.use((packet, next) => {
+        socket.request.session.reload((err) => {
+          if(err) next(err);
+          next();
+        });
+      });
+
+But this lead to stack overflow in express-session(!). Trying to use express-session with socket.io may just be the wrong approach.
+
+Alt 3: With session established by express-session we get these cookies on socket.io connection:
+
+    connect.sid: s:i77nbbCQOjGbchv2s20EVokAgqNyHr2L.MJGdNuNsPQXxmyHtHC8U6BWMnI2xLuHnKyVHRW24wWA
+    io: x1VH4cJMfk73GTIxAAAB
+
+"x1VH4cJMfk73GTIxAAAB" is the socket id, "i77nbbCQOjGbchv2s20EVokAgqNyHr2L" is the session id, "MJGdNuNsPQXxmyHtHC8U6BWMnI2xLuHnKyVHRW24wWA" is a cookie signature "connect.sid" is the default name of the session cookie set by expressjs. So it's just a matter of parsing the SID cookie and accessing the session yourself. Express will access the same cookie etc. This works good.
+
 ### List of Online Users
-Whether a user is logged in or not is indicated by the existence of a session with auth=1. connect-redis will automatically expire session based on the cookie setting `maxAge` and/or `expires`. But we also need to keep global information about the users that is not private to each user session. Specifically, a set of logged in users. If a user requests to logout explicitly we know who the user is and we can explicitly delete all necessary data. However connect-redis is coming along and only deleting part of the user data without giving us an opportunity to clean up elsewhere (there is no hook into the delete process AFAIK). How to solve:
+See [namespace.clients](https://github.com/socketio/socket.io/blob/master/docs/API.md#namespaceclientscallback).
 
-  - Alt 1: Set a TTL on other data too and essentially mirror what redis-connect is doing setting a up period purge job and touching TTL on new user activity.
-  - Alt 2: Don't use separate data structures. Store everything in session data and construct a users collection in the application space by enumerating the session store.
-  - Alt 3: Redis notifications.
-  - Alt 4: Redis notifications and periodically A1 as well.
-
-Going with A2. A1 present possibility of a race. I'd probably do A4 in a production system. Apparently notifications are not completely reliable so if you implemented A3 you'd end up having to do A4 anyway. A2 is the simplest but not very efficient and pretty hacky. Meh.
 
 ## Implementation Review
 
@@ -43,3 +74,4 @@ Going with A2. A1 present possibility of a race. I'd probably do A4 in a product
   - Not well tested but seems to work.
 
 [socket.io]: https://github.com/socketio/socket.io/blob/master/docs/README.md
+[so1]: https://stackoverflow.com/questions/25532692/how-to-share-sessions-with-socket-io-1-x-and-express-4-x?noredirect=1&lq=1
