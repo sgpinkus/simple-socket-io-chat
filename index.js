@@ -8,10 +8,13 @@ const morgan = require('morgan');
 const BodyParser = require('body-parser');
 const CookieParser = require('cookie-parser')
 const Redis = require('redis'); // https://github.com/NodeRedis/node_redis
+const RedisAdapter = require('socket.io-redis');
 require('bluebird').promisifyAll(Redis); // Monkey patches xxxAsync() for all xxx() -- https://github.com/NodeRedis/node_redis
 const Handlebars = require('handlebars');
+const assert = require('assert');
 
-
+assert([2,3].includes(process.argv.length));
+const port = process.argv[2] || 3000;
 const app = Express();
 const server = Server(app);
 const redisClient = Redis.createClient();
@@ -23,7 +26,7 @@ const session = Session({
   resave: true,
   rolling: true, // Reset max age with each new client request.
   saveUninitialized: true,
-  cookie: { maxAge: 7000 }}
+  cookie: { maxAge: 60000 }}
 );
 const templates = {
   login: Handlebars.compile(fs.readFileSync(__dirname + '/login.html').toString()),
@@ -72,8 +75,8 @@ redisSub.on('message', (channel, message) => {
   }
 });
 
-server.listen(3000, () => {
-  console.log('listening on *:3000');
+server.listen(port, () => {
+  console.log(`listening on *:${port}`);
 });
 
 app.use(morgan('common', { stream: { write: message => { console.info(message.trim(), { tags: 'http' }); } } }));
@@ -180,9 +183,11 @@ async function login(req, io) {
  * cookie (ignoring signature).
  **************************************************************************************************/
 
+const redisAdaptor = RedisAdapter({ host: 'localhost', port: 6379 });
 const io = SocketIO(server, {
   pingInterval: 10000,
   pingTimeout: 5000,
+  adapter: redisAdaptor,
 });
 const cookieParser = CookieParser();
 io.use((socket, next) => cookieParser(socket.request, {}, next));
