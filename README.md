@@ -75,3 +75,4 @@ See [namespace.clients](https://github.com/socketio/socket.io/blob/master/docs/A
 
 [socket.io]: https://github.com/socketio/socket.io/blob/master/docs/README.md
 [so1]: https://stackoverflow.com/questions/25532692/how-to-share-sessions-with-socket-io-1-x-and-express-4-x?noredirect=1&lq=1
+[generateId]: https://stackoverflow.com/questions/7702461/socket-io-custom-client-id

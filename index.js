@@ -12,13 +12,15 @@ const RedisAdapter = require('socket.io-redis');
 require('bluebird').promisifyAll(Redis); // Monkey patches xxxAsync() for all xxx() -- https://github.com/NodeRedis/node_redis
 const Handlebars = require('handlebars');
 const assert = require('assert');
+const crypto = require('crypto');
 
 assert([2,3].includes(process.argv.length));
 const port = process.argv[2] || 3000;
 const app = Express();
 const server = Server(app);
-const redisClient = Redis.createClient();
-const redisSub = Redis.createClient();
+const REDIS_PORT = 6380
+const redisClient = Redis.createClient(REDIS_PORT);
+const redisSub = Redis.createClient(REDIS_PORT);
 const sessionStore = new ConnectRedis({ client: redisClient });
 const session = Session({
   store: sessionStore,
@@ -183,18 +185,30 @@ async function login(req, io) {
  * cookie (ignoring signature).
  **************************************************************************************************/
 
-const redisAdaptor = RedisAdapter({ host: 'localhost', port: 6379 });
+const redisAdaptor = RedisAdapter({ host: 'localhost', port: 6380 });
 const io = SocketIO(server, {
   pingInterval: 10000,
   pingTimeout: 5000,
   adapter: redisAdaptor,
 });
 const cookieParser = CookieParser();
+
 io.use((socket, next) => cookieParser(socket.request, {}, next));
 io.use(setSession);
 io.use(authenticateConnection);
+
+let custom_id=0;
+io.engine.generateId = (req) => {
+  console.debug('Generating new id');
+  console.debug(req.headers);
+  cookieParser(req, null, () => {});
+  console.log(req.cookies);
+  return crypto.randomBytes(16).toString('hex');
+}
+
+
 io.on('connection', (socket) => {
-  console.log('new socket connection');
+  console.log(`new socket connection: id=${socket.id}`);
   socket.use((packet, next) => cookieParser(socket.request, {}, next));
   socket.use((packet, next) => setSession(socket, next));
   socket.use((packet, next) => authenticateConnection(socket, next));
