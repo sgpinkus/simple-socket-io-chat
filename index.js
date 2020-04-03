@@ -19,12 +19,15 @@ const port = process.argv[2] || 3000;
 const app = Express();
 const server = Server(app);
 const REDIS_PORT = 6380
+const SESSION_COOKIE_NAME = 'connect.sid';
+const SESSION_SECRET = 'secrets';
 const redisClient = Redis.createClient(REDIS_PORT);
 const redisSub = Redis.createClient(REDIS_PORT);
 const sessionStore = new ConnectRedis({ client: redisClient });
 const session = Session({
   store: sessionStore,
-  secret: 'secrets',
+  secret: SESSION_SECRET,
+  name: SESSION_COOKIE_NAME,
   resave: true,
   rolling: true, // Reset max age with each new client request.
   saveUninitialized: true,
@@ -191,10 +194,10 @@ const io = SocketIO(server, {
   pingTimeout: 5000,
   adapter: redisAdaptor,
 });
-const cookieParser = CookieParser('secrets');
+const cookieParser = CookieParser(SESSION_SECRET);
 
 io.use((socket, next) => cookieParser(socket.request, {}, next));
-io.use(setSession);
+io.use(initializeConnectionSession);
 io.use(authenticateConnection);
 io.use(debugConnection);
 
@@ -217,8 +220,49 @@ io.on('connection', (socket) => {
   socket.on('chat message', (message) => chatMessage(socket, message));
   socket.on('direct message', (message) => directMessage(socket, message));
   socket.on('disconnect', (data, next) => { console.log('socket disconnected'); });
-  initSocket(socket);
+  initConnectedSocket(socket);
 });
+
+
+async function initializeConnectionSession(socket, next) {
+  try {
+    const sessionId = socket.request.signedCookies[SESSION_COOKIE_NAME];
+    console.log('Found sid', sessionId);
+    const session = await new Promise((resolve, reject) => {
+      sessionStore.get(sessionId, (err, session) => {
+        if(err) reject(err);
+        resolve(session);
+      });
+    });
+    console.log('Found session', session);
+    socket.conn.sessionId = sessionId;
+    socket.conn.session = session;
+    next();
+  }
+  catch(err) {
+    console.error('No existing session was found for this connection.');
+    socket.disconnect(true);
+    next(err);
+  }
+}
+
+
+
+/**
+ * Session based authentication of the connection on connection establishment. Auth is not checked with
+ * each socket event.
+ */
+function authenticateConnection(socket, next) {
+  if(!socket.conn.session || !(socket.conn.session.auth == 1)) {
+    console.error('user not logged in');
+    socket.disconnect();
+    next(new Error('You are not logged in')); // This doesn't actually disconnect. Just sends 'error' back.
+  }
+  else {
+    console.log(`${socket.conn.session.nick} is logged in`);
+    next()
+  }
+}
 
 
 function debugConnection(socket, next) {
@@ -233,11 +277,11 @@ function debugConnection(socket, next) {
  * Used to refresh the request.session object manually with every packet. The session object
  * attached to request goes stale since the express-session MW is only invoked on new connections not new packets.
  * Invoking it with each packet does not work either. This is the only robust solution I've found.
+ * Precondition: initializeConnectionSession.
  */
 async function setSession(socket, next) {
   try {
-    const sessionId = socket.request.signedCookies['connect.sid']
-    console.log('Found sid', sessionId);
+    const sessionId = socket.conn.sessionId;
     const session = await new Promise((resolve, reject) => {
       sessionStore.get(sessionId, (err, session) => {
         if(err) reject(err);
@@ -245,7 +289,7 @@ async function setSession(socket, next) {
       });
     });
     console.log('Found session', session);
-    socket.request.session = session;
+    socket.conn.session = session;
     next();
   }
   catch(err) {
@@ -255,40 +299,19 @@ async function setSession(socket, next) {
 }
 
 
+/**
+ * Sync socket.conn.session with session store
+ */
 function saveSession(socket) {
-  const sessionId = socket.request.signedCookies['connect.sid']
-  sessionStore.set(sessionId, socket.request.session, (err) => {
+  const sessionId = socket.conn.sessionId;
+  sessionStore.set(sessionId, socket.conn.session, (err) => {
     if(err) throw new Error(err);
     console.log('Saved session');
   });
 }
 
-
-/**
- * Session based authentication of the connection on connection establishment. Auth is not checked with
- * each socket event.
- */
-function authenticateConnection(socket, next) {
-  if(!socket.request.session || !(socket.request.session.auth == 1)) {
-    console.error('user not logged in');
-    socket.disconnect();
-    next(new Error('You are not logged in')); // This doesn't actually disconnect. Just sends 'error' back.
-  }
-  else {
-    console.log(`${socket.request.session.nick} is logged in`);
-    next()
-  }
-}
-
-
-function logConnection(socket, next) {
-  console.log(`socket.io request: path=${socket.request.path}, auth=${socket.request.session.auth}`)
-  next()
-}
-
-
-async function initSocket(socket) {
-  const user = { nick: socket.request.session.nick, color: socket.request.session.color };
+async function initConnectedSocket(socket) {
+  const user = { nick: socket.conn.session.nick, color: socket.conn.session.color };
   socket.emit('update', { user: user, users: (await users.getUsers()) });
   for(let message of messageBuffer) {
     socket.emit('chat message', message);
@@ -297,7 +320,7 @@ async function initSocket(socket) {
 
 
 function chatMessage(socket, data) {
-  let session = socket.request.session;
+  let session = socket.conn.session;
   console.log(`chat message: @${session.nick}: ${data}`);
   session.chat_count = session.chat_count ? session.chat_count + 1 : 1;
   saveSession(socket);
@@ -321,7 +344,7 @@ function chatMessage(socket, data) {
 
 
 async function directMessage(socket, data) {
-  let session = socket.request.session;
+  let session = socket.conn.session;
   console.log(`direct message: @${session.nick}:`, data);
   session.dm_count = session.dm_count ? session.dm_count + 1 : 1;
   saveSession(socket);
