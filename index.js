@@ -182,7 +182,7 @@ async function login(req, io) {
  *
  * Sessions: We can access the Express session in a socket but the session middleware isn't invoked
  * the same as in Express, and it's dodgy. So using custom session access based off express-session
- * cookie (ignoring signature).
+ * cookie (ignoring signature). See setSession().
  **************************************************************************************************/
 
 const redisAdaptor = RedisAdapter({ host: 'localhost', port: 6380 });
@@ -191,11 +191,13 @@ const io = SocketIO(server, {
   pingTimeout: 5000,
   adapter: redisAdaptor,
 });
-const cookieParser = CookieParser();
+const cookieParser = CookieParser('secrets');
 
 io.use((socket, next) => cookieParser(socket.request, {}, next));
 io.use(setSession);
 io.use(authenticateConnection);
+io.use(debugConnection);
+
 
 let custom_id=0;
 io.engine.generateId = (req) => {
@@ -219,13 +221,22 @@ io.on('connection', (socket) => {
 });
 
 
+function debugConnection(socket, next) {
+  const { signedCookies, cookies } = socket.request;
+  console.log('signedCookies', signedCookies)
+  console.log('cookies', cookies);
+  next();
+}
+
+
 /**
- * Used to refresh the request.session object manually. The session object attached to request goes
- * stale since the express-session MW is only invoked on new connections not new packets.
+ * Used to refresh the request.session object manually with every packet. The session object
+ * attached to request goes stale since the express-session MW is only invoked on new connections not new packets.
+ * Invoking it with each packet does not work either. This is the only robust solution I've found.
  */
 async function setSession(socket, next) {
   try {
-    const sessionId = /s:([^.]+)\.(.*)$/.exec(socket.request.cookies['connect.sid'])[1]
+    const sessionId = socket.request.signedCookies['connect.sid']
     console.log('Found sid', sessionId);
     const session = await new Promise((resolve, reject) => {
       sessionStore.get(sessionId, (err, session) => {
@@ -245,7 +256,7 @@ async function setSession(socket, next) {
 
 
 function saveSession(socket) {
-  const sessionId = /s:([^.]+)\.(.*)$/.exec(socket.request.cookies['connect.sid'])[1]
+  const sessionId = socket.request.signedCookies['connect.sid']
   sessionStore.set(sessionId, socket.request.session, (err) => {
     if(err) throw new Error(err);
     console.log('Saved session');
