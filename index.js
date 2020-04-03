@@ -28,7 +28,7 @@ const session = Session({
   resave: true,
   rolling: true, // Reset max age with each new client request.
   saveUninitialized: true,
-  cookie: { maxAge: 60000 }}
+  cookie: { maxAge: 15000 }}
 );
 const templates = {
   login: Handlebars.compile(fs.readFileSync(__dirname + '/login.html').toString()),
@@ -219,6 +219,10 @@ io.on('connection', (socket) => {
 });
 
 
+/**
+ * Used to refresh the request.session object manually. The session object attached to request goes
+ * stale since the express-session MW is only invoked on new connections not new packets.
+ */
 async function setSession(socket, next) {
   try {
     const sessionId = /s:([^.]+)\.(.*)$/.exec(socket.request.cookies['connect.sid'])[1]
