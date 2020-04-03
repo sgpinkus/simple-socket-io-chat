@@ -214,9 +214,7 @@ io.engine.generateId = (req) => {
 
 io.on('connection', (socket) => {
   console.log(`new socket connection: id=${socket.id}`);
-  socket.use((packet, next) => cookieParser(socket.request, {}, next));
   socket.use((packet, next) => setSession(socket, next));
-  socket.use((packet, next) => authenticateConnection(socket, next));
   socket.on('chat message', (message) => chatMessage(socket, message));
   socket.on('direct message', (message) => directMessage(socket, message));
   socket.on('disconnect', (data, next) => { console.log('socket disconnected'); });
@@ -235,12 +233,14 @@ async function initializeConnectionSession(socket, next) {
       });
     });
     console.log('Found session', session);
+    session.socket_id = socket.id;
     socket.conn.sessionId = sessionId;
     socket.conn.session = session;
+    saveSession(socket);
     next();
   }
   catch(err) {
-    console.error('No existing session was found for this connection.');
+    console.error('No existing session was found for this connection. Please signin.');
     socket.disconnect(true);
     next(err);
   }
@@ -293,7 +293,7 @@ async function setSession(socket, next) {
     next();
   }
   catch(err) {
-    console.error('Could not set session');
+    console.error('No session found for connection. Please sign in again.');
     next(err);
   }
 }
@@ -309,6 +309,7 @@ function saveSession(socket) {
     console.log('Saved session');
   });
 }
+
 
 async function initConnectedSocket(socket) {
   const user = { nick: socket.conn.session.nick, color: socket.conn.session.color };
@@ -345,11 +346,10 @@ function chatMessage(socket, data) {
 
 async function directMessage(socket, data) {
   let session = socket.conn.session;
-  console.log(`direct message: @${session.nick}:`, data);
+  let {nick, message} = data;
   session.dm_count = session.dm_count ? session.dm_count + 1 : 1;
   saveSession(socket);
   try {
-    let {nick, message} = data;
     let user = (await users.getUserByNick(nick))
     if(!user) {
       throw new Error('User does not exist')
@@ -360,10 +360,11 @@ async function directMessage(socket, data) {
       user: { nick: session.nick, color: session.color },
       to: user,
     }
+    console.log(`direct message: @${session.nick}:`, data, user.socket_id);
     socket.emit('chat message', payload);
     socket.to(user.socket_id).emit('chat message', payload);
   }
   catch(err) {
-    // todo: something.
+    socket.emit('user error', { error: `Could not send direct message to ${nick}` });
   }
 }
