@@ -247,7 +247,6 @@ async function initializeConnectionSession(socket, next) {
 }
 
 
-
 /**
  * Session based authentication of the connection on connection establishment. Auth is not checked with
  * each socket event.
@@ -255,12 +254,12 @@ async function initializeConnectionSession(socket, next) {
 function authenticateConnection(socket, next) {
   if(!socket.conn.session || !(socket.conn.session.auth == 1)) {
     console.error('user not logged in');
-    socket.disconnect();
+    socket.disconnect(true);
     next(new Error('You are not logged in')); // This doesn't actually disconnect. Just sends 'error' back.
   }
   else {
     console.log(`${socket.conn.session.nick} is logged in`);
-    next()
+    next();
   }
 }
 
@@ -285,29 +284,37 @@ async function setSession(socket, next) {
     const session = await new Promise((resolve, reject) => {
       sessionStore.get(sessionId, (err, session) => {
         if(err) reject(err);
+        if(!session) reject(new Error('Undefined session'));
         resolve(session);
       });
     });
-    console.log('Found session', session);
+    console.log('Setting session', session);
     socket.conn.session = session;
     next();
   }
   catch(err) {
     console.error('No session found for connection. Please sign in again.');
+    socket.disconnect(true);
     next(err);
   }
 }
 
 
 /**
- * Sync socket.conn.session with session store
+ * Sync socket.conn.session with session store. This isn't MW because AFAIK middleware runs always
+ * runs first, so you have to call it explicitly.
+ * BUG: If the session cookie isn't being updated this can cause: "Error: ReplyError: ERR invalid expire time in set"
+ *  This only happens when the session is close to being expired. Currently fails silently and
+ *  shortly after the session should expire.
  */
 function saveSession(socket) {
-  const sessionId = socket.conn.sessionId;
-  sessionStore.set(sessionId, socket.conn.session, (err) => {
-    if(err) throw new Error(err);
-    console.log('Saved session');
-  });
+  const { sessionId, session } = socket.conn;
+  if(sessionId && session) {
+    sessionStore.set(sessionId, socket.conn.session, (err) => {
+      if(err) return console.error(`Failed to save session: ${err}`);
+      console.log('Saved session');
+    });
+  }
 }
 
 
@@ -323,23 +330,27 @@ async function initConnectedSocket(socket) {
 function chatMessage(socket, data) {
   let session = socket.conn.session;
   console.log(`chat message: @${session.nick}: ${data}`);
-  session.chat_count = session.chat_count ? session.chat_count + 1 : 1;
-  saveSession(socket);
-  if(data.length == 0) {
-    io.emit('error', Error('Message has length of 0'));
-  }
-  else if(data.length > 1000) {
-    io.emit('error', Error(`Message too big [${data.length}]`));
-  }
-  else {
-    let payload = {
-      message: data,
-      timestamp: new Date().getTime(),
-      user: { nick: session.nick, color: session.color },
+  try {
+    session.chat_count = session.chat_count ? session.chat_count + 1 : 1;
+    saveSession(socket);
+    if(data.length == 0) {
+      io.emit('error', Error('Message has length of 0'));
     }
-    messageBuffer.push(payload);
-    messageBuffer = messageBuffer.slice(-3, messageBuffer.length);
-    io.emit('chat message', payload); // Emit to every connected socket
+    else if(data.length > 1000) {
+      io.emit('error', Error(`Message too big [${data.length}]`));
+    }
+    else {
+      let payload = {
+        message: data,
+        timestamp: new Date().getTime(),
+        user: { nick: session.nick, color: session.color },
+      }
+      messageBuffer.push(payload);
+      messageBuffer = messageBuffer.slice(-3, messageBuffer.length);
+      io.emit('chat message', payload); // Emit to every connected socket
+    }
+  } catch(err) {
+    socket.emit('user error', { error: `Could not send message` });
   }
 }
 
@@ -347,9 +358,9 @@ function chatMessage(socket, data) {
 async function directMessage(socket, data) {
   let session = socket.conn.session;
   let {nick, message} = data;
-  session.dm_count = session.dm_count ? session.dm_count + 1 : 1;
-  saveSession(socket);
   try {
+    session.dm_count = session.dm_count ? session.dm_count + 1 : 1;
+    saveSession(socket);
     let user = (await users.getUserByNick(nick))
     if(!user) {
       throw new Error('User does not exist')
