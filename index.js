@@ -15,12 +15,13 @@ const assert = require('assert');
 const crypto = require('crypto');
 
 assert([2,3].includes(process.argv.length));
-const port = process.argv[2] || 3001;
-const app = Express();
-const server = Server(app);
+const PORT = process.argv[2] || 3001;
 const REDIS_PORT = 6379;
 const SESSION_COOKIE_NAME = 'connect.sid';
 const SESSION_SECRET = 'secrets';
+const app = Express();
+const server = Server(app);
+
 const redisClient = Redis.createClient(REDIS_PORT);
 const redisSub = Redis.createClient(REDIS_PORT);
 const sessionStore = new ConnectRedis({ client: redisClient });
@@ -31,15 +32,23 @@ const session = Session({
   resave: true,
   rolling: true, // Reset max age with each new client request.
   saveUninitialized: true,
-  cookie: { maxAge: 15000 }}
+  cookie: { maxAge: 60000 }}
 );
 const templates = {
   login: Handlebars.compile(fs.readFileSync(__dirname + '/login.html').toString()),
 };
 let messageBuffer = [];
 
+server.listen(PORT, () => {
+  console.log(`listening on *:${PORT}`);
+});
+app.use(morgan('common', { stream: { write: message => { console.info(message.trim(), { tags: 'http' }); } } }));
+app.use(session);
+app.use(BodyParser.json()); // support json encoded bodies
+app.use(BodyParser.urlencoded({ extended: true })); // support encoded bodies
+
 /**
- * Inefficient way of establishing list of logged in users by enumerating sessions.
+ * Logged in users service. Thin wrapper over session store to enumerate logged in user sessions.
  */
 const users = new (class {
   constructor(sessionStore) {
@@ -79,15 +88,6 @@ redisSub.on('message', (channel, message) => {
     break;
   }
 });
-
-server.listen(port, () => {
-  console.log(`listening on *:${port}`);
-});
-
-app.use(morgan('common', { stream: { write: message => { console.info(message.trim(), { tags: 'http' }); } } }));
-app.use(session);
-app.use(BodyParser.json()); // support json encoded bodies
-app.use(BodyParser.urlencoded({ extended: true })); // support encoded bodies
 
 app.get('/login', (req, res) => {
   if(req.session.auth == 1) {
@@ -147,9 +147,11 @@ app.get('/', (req, res) => {
   res.sendFile(__dirname + '/index.html');
 });
 
+
 app.get('/users', async (req, res) => {
   res.send(await users.getUsers());
 });
+
 
 app.get('/ping', async (req, res) => {
   res.send('pong');
