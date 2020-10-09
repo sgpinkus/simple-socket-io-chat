@@ -1,4 +1,5 @@
 const fs = require('fs');
+const lodash = require('lodash');
 const Express = require('express');
 const Session = require('express-session'); // https://github.com/expressjs/session
 const ConnectRedis = require('connect-redis')(Session); // https://github.com/tj/connect-redis
@@ -16,14 +17,18 @@ const crypto = require('crypto');
 
 assert([2,3].includes(process.argv.length));
 const PORT = process.argv[2] || 3001;
-const REDIS_PORT = 6379;
+const REDIS_PORT = 6380;
 const SESSION_COOKIE_NAME = 'connect.sid';
 const SESSION_SECRET = 'secrets';
 const app = Express();
 const server = Server(app);
 
 const redisClient = Redis.createClient(REDIS_PORT);
-const redisSub = Redis.createClient(REDIS_PORT);
+const redisSessionsSub = Redis.createClient(REDIS_PORT);
+const redisOnlineSub = Redis.createClient(REDIS_PORT);
+
+redisClient.config('set', 'notify-keyspace-events', 'EKx');
+
 const sessionStore = new ConnectRedis({ client: redisClient });
 const session = Session({
   store: sessionStore,
@@ -50,9 +55,10 @@ app.use(BodyParser.urlencoded({ extended: true })); // support encoded bodies
 /**
  * Logged in users service. Thin wrapper over session store to enumerate logged in user sessions.
  */
-const users = new (class {
-  constructor(sessionStore) {
+const Users = new (class {
+  constructor(sessionStore, redisClient) {
     this.sessionStore = sessionStore;
+    this.redisClient = redisClient;
   }
 
   async getUsers() {
@@ -61,33 +67,17 @@ const users = new (class {
         if(err) reject(err);
         else resolve(sessions);
       });
-    })).filter((v) => v.auth == 1).map((v) => { return { nick: v.nick, color: v.color, socket_id: v.socket_id }; });
+    }))
+      .filter((v) => v.auth === 1)
+      .map((v) => lodash.pick(v, ['nick', 'color', 'socket_id']));
+    if(sessions.length)  {
+      let statuses = await this.redisClient.mgetAsync(sessions.map(u => `users:${u.nick}:status`));
+      sessions = sessions.map((s, i) => ({ ...s, status: statuses[i] }));
+    }
+    sessions = lodash.keyBy(sessions, 'nick');
     return sessions;
   }
-
-  async getNicks() {
-    return (await this.getUsers()).map((v) => v.nick);
-  }
-
-  async getUserByNick(nick) {
-    return (await this.getUsers()).filter((v) => v.nick == nick)[0];
-  }
-})(sessionStore);
-
-
-/**
- * This currently does nothing but log a msg. Could be used to clean up non session storage user data
- * and log the user out on session expiration.
- */
-redisSub.on('message', (channel, message) => {
-  switch(message) {
-  case 'expired':
-    console.log(`session expired: ${channel.split(':')[2]}`);
-    break;
-  default:
-    break;
-  }
-});
+})(sessionStore, redisClient);
 
 app.get('/login', (req, res) => {
   if(req.session.auth == 1) {
@@ -106,7 +96,8 @@ app.post('/login', async (req, res, next) => {
     if(!regexp.test(req.body.nick)) {
       errors.push({ message: `Nick must match '${regexp}'` });
     }
-    if(!errors.length && (await users.getNicks()).indexOf(req.body.nick) >= 0) {
+    const nicks = Object.keys((await Users.getUsers()));
+    if(!errors.length && nicks.indexOf(req.body.nick) >= 0) {
       errors.push({message: `Nick '${req.body.nick}' is already being used`});
     }
     if(!errors.length) {
@@ -142,21 +133,17 @@ app.use((req, res, next) => {
   }
 });
 
-
 app.get('/', (req, res) => {
   res.sendFile(__dirname + '/index.html');
 });
 
-
 app.get('/users', async (req, res) => {
-  res.send(await users.getUsers());
+  res.send(await Users.getUsers());
 });
-
 
 app.get('/ping', async (req, res) => {
   res.send('pong');
 });
-
 
 /**
  * Purge user login data.
@@ -164,7 +151,7 @@ app.get('/ping', async (req, res) => {
 async function logout(req) {
   if(!req.session) return;
   req.session.destroy();
-  io.emit('update', { users: (await users.getUsers()) } );
+  io.emit('update', { users: (await Users.getUsers()) } );
 }
 
 /**
@@ -174,9 +161,19 @@ async function login(req, io) {
   req.session.auth = 1;
   req.session.nick = req.body.nick;
   req.session.color = '#' + Math.random().toString().substring(2,8).toUpperCase();
-  io.emit('update', { users: (await users.getUsers()) } );
-  redisSub.subscribe(`__keyspace@0__:sess:${req.session.id}`);
+  io.emit('update', { users: (await Users.getUsers()) } );
+  redisSessionsSub.subscribe(`__keyspace@0__:sess:${req.session.id}`);
 }
+
+/**
+ * Listener for expired session events. Could be used to clean up non session
+ * storage user data and log the user out on session expiration.
+ */
+redisSessionsSub.on('message', (channel, message) => {
+  if(message === 'expired') {
+    console.log(`session expired: ${channel.split(':')[2]}`);
+  }
+});
 
 
 /**************************************************************************************************
@@ -197,44 +194,48 @@ const io = SocketIO(server, {
   adapter: redisAdaptor,
 });
 const cookieParser = CookieParser(SESSION_SECRET);
+let custom_id=0;
 
 io.use((socket, next) => cookieParser(socket.request, {}, next));
-io.use(initializeConnectionSession);
+io.use(initializeSocketSession);
 io.use(authenticateConnection);
-io.use(debugConnection);
 
-
-let custom_id=0;
 io.engine.generateId = (req) => {
-  console.debug('Generating new id');
-  console.debug(req.headers);
   cookieParser(req, null, () => {});
-  console.log(req.cookies);
   return crypto.randomBytes(16).toString('hex');
 };
-
 
 io.on('connection', (socket) => {
   console.log(`new socket connection: id=${socket.id}`);
   socket.use((packet, next) => setSession(socket, next));
+  socket.use((packet, next) => touchOnline(socket, next));
   socket.on('chat message', (message) => chatMessage(socket, message));
   socket.on('direct message', (message) => directMessage(socket, message));
   socket.on('disconnect', (data, next) => { console.log('socket disconnected'); });
   initConnectedSocket(socket);
+  touchOnline(socket, () => {});
 });
 
+/**
+ * Listener for activity timeout.
+ */
+redisOnlineSub.on('message', async (channel, message) => {
+  console.log('expired', channel, message);
+  io.emit('update', { users: (await Users.getUsers()) } );
+});
 
-async function initializeConnectionSession(socket, next) {
+redisOnlineSub.subscribe('__keyevent@0__:expired');
+
+async function initializeSocketSession(socket, next) {
   try {
     const sessionId = socket.request.signedCookies[SESSION_COOKIE_NAME];
-    console.log('Found sid', sessionId);
+    console.log(`initializeSocketSession() found sid=${sessionId}`);
     const session = await new Promise((resolve, reject) => {
       sessionStore.get(sessionId, (err, session) => {
         if(err) reject(err);
         resolve(session);
       });
     });
-    console.log('Found session', session);
     session.socket_id = socket.id;
     socket.conn.sessionId = sessionId;
     socket.conn.session = session;
@@ -266,11 +267,37 @@ function authenticateConnection(socket, next) {
 }
 
 
-function debugConnection(socket, next) {
-  const { signedCookies, cookies } = socket.request;
-  console.log('signedCookies', signedCookies);
-  console.log('cookies', cookies);
-  next();
+/**
+ * On new connection, send buffer of latest messages, users, and the users nick for the duration of the login.
+ */
+async function initConnectedSocket(socket) {
+  const users = await Users.getUsers();
+  socket.emit('init', { nick: socket.conn.session.nick, users });
+  for(let message of messageBuffer) {
+    socket.emit('chat message', message);
+  }
+}
+
+
+/**
+ */
+async function touchOnline(socket, next) {
+  try {
+    const session = socket.conn.session;
+    const k = `users:${session.nick}:status`;
+    const status = await redisClient.getAsync(k);
+    await redisClient.setAsync(k, 'online', 'EX', '15');
+    if(!status) {
+      io.emit('update', { users: (await Users.getUsers()) } );
+    }
+    console.log('touchOnline', k);
+    next();
+  }
+  catch(err) {
+    console.error(err);
+    socket.disconnect(true);
+    next(err);
+  }
 }
 
 
@@ -278,7 +305,7 @@ function debugConnection(socket, next) {
  * Used to refresh the request.session object manually with every packet. The session object
  * attached to request goes stale since the express-session MW is only invoked on new connections not new packets.
  * Invoking it with each packet does not work either. This is the only robust solution I've found.
- * Precondition: initializeConnectionSession.
+ * Precondition: initializeSocketSession.
  */
 async function setSession(socket, next) {
   try {
@@ -289,8 +316,8 @@ async function setSession(socket, next) {
         resolve(session);
       });
     });
-    console.log('Setting session', session);
     socket.conn.session = session;
+    console.log('setSession', session);
     next();
   }
   catch(err) {
@@ -313,24 +340,14 @@ function saveSession(socket) {
   if(sessionId && session) {
     sessionStore.set(sessionId, socket.conn.session, (err) => {
       if(err) return console.error(`Failed to save session: ${err}`);
-      console.log('Saved session');
+      console.log('saveSession');
     });
-  }
-}
-
-
-async function initConnectedSocket(socket) {
-  const user = { nick: socket.conn.session.nick, color: socket.conn.session.color };
-  socket.emit('update', { user: user, users: (await users.getUsers()) });
-  for(let message of messageBuffer) {
-    socket.emit('chat message', message);
   }
 }
 
 
 function chatMessage(socket, data) {
   let session = socket.conn.session;
-  console.log(`chat message: @${session.nick}: ${data}`);
   try {
     session.chat_count = session.chat_count ? session.chat_count + 1 : 1;
     saveSession(socket);
@@ -342,13 +359,14 @@ function chatMessage(socket, data) {
     }
     else {
       let payload = {
-        message: data,
+        text: data,
         timestamp: new Date().getTime(),
-        user: { nick: session.nick, color: session.color },
+        user: session.nick,
       };
       messageBuffer.push(payload);
       messageBuffer = messageBuffer.slice(-3, messageBuffer.length);
       io.emit('chat message', payload); // Emit to every connected socket
+      console.log(`chat message: @${session.nick}: ${data}`);
     }
   } catch(err) {
     socket.emit('user error', { error: 'Could not send message' });
@@ -362,15 +380,15 @@ async function directMessage(socket, data) {
   try {
     session.dm_count = session.dm_count ? session.dm_count + 1 : 1;
     saveSession(socket);
-    let user = (await users.getUserByNick(nick));
+    let user = (await Users.getUsers())[nick];
     if(!user) {
       throw new Error('User does not exist');
     }
     let payload = {
-      message: message,
+      text: message,
       timestamp: new Date().getTime(),
-      user: { nick: session.nick, color: session.color },
-      to: user,
+      user: session.nick,
+      to: nick,
     };
     console.log(`direct message: @${session.nick}:`, data, user.socket_id);
     socket.emit('chat message', payload);

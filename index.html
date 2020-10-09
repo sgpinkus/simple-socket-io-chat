@@ -4,6 +4,7 @@
     <title>Simple Chat</title>
     <meta charset='utf-8' />
     <script src="https://unpkg.com/axios/dist/axios.min.js"></script>
+    <script src="https://unpkg.com/lodash@4.17.20/lodash.min.js"></script>
     <style>
     * { border: 0; padding: 0; margin: 0; }
     html, body { height: 100%; box-sizing: border-box; }
@@ -37,21 +38,22 @@
     <script type="text/babel">
 
     function Message(props) {
-      let {timestamp, user, message, to} = props.message;
+      let { user, message, to } = props;
+      let { timestamp, text } = message;
       if(to) {
         return <li className='message' >
-          <span>{new Date(timestamp).toLocaleTimeString()}</span>&nbsp;<Nick user={user} /> -> <Nick user={to} />:&nbsp;<span className='message-body'>{message}</span>
+          <span>{new Date(timestamp).toLocaleTimeString()}</span>&nbsp;<Nick user={user} /> -> <Nick user={to} />:&nbsp;<span className='message-body'>{text}</span>
         </li>
       }
       else {
         return <li className='message' >
-          <span>{new Date(timestamp).toLocaleTimeString()}</span>&nbsp;<Nick user={user} />:&nbsp;<span className='message-body'>{message}</span>
+          <span>{new Date(timestamp).toLocaleTimeString()}</span>&nbsp;<Nick user={user} />:&nbsp;<span className='message-body'>{text}</span>
         </li>
       }
     }
 
     function Nick(props) {
-      return <strong style={{ color: props.user.color }}>@{props.user.nick}</strong>
+      return <strong style={{ color: props.user.color, fontStyle: props.user.status ? 'italic' : 'normal' }}>@{props.user.nick}</strong>
     }
 
     function UserStatus(props) {
@@ -61,11 +63,10 @@
     class App extends React.Component {
       constructor(props) {
         super(props);
-        console.log('App init');
         this.state = {
-          user: {nick: '-', color: '#000'},
+          nick: '-',
           message: '',
-          users: [],
+          users: {},
           messages: [],
         };
         this.handleSubmit = this.handleSubmit.bind(this);
@@ -73,6 +74,7 @@
         this.onSocketConnect = this.onSocketConnect.bind(this);
         this.onSocketDisconnect = this.onSocketDisconnect.bind(this);
         this.onSocketError = this.onSocketError.bind(this);
+        this.onSocketInit = this.onSocketInit.bind(this);
         this.onSocketUpdate = this.onSocketUpdate.bind(this);
         this.onSocketChatMessage = this.onSocketChatMessage.bind(this);
         this.socket = io();
@@ -80,13 +82,18 @@
         this.socket.on('disconnect', this.onSocketDisconnect);
         this.socket.on('error', this.onSocketError);
         this.socket.on('update', this.onSocketUpdate);
+        this.socket.on('init', this.onSocketInit);
         this.socket.on('chat message', this.onSocketChatMessage);
         this.pingTimer = setInterval(() => this.ping(), 30000);
       }
 
       render() {
-        const messageListItems = this.state.messages.map((message, index) => <Message message={message} key={index} />)
-        const userListItems = this.state.users.map((user) => <UserStatus user={user} key={user.nick} />)
+        const messageListItems = this.state.messages.map((message, index) => {
+          const to = this.state.users[message.to];
+          const user = this.state.users[message.user];
+          return <Message to={to} user={user} message={message} key={index} />;
+        })
+        const userListItems = Object.values(this.state.users).map((user) => <UserStatus user={user} key={user.nick} />)
         return (
           <div className='main-container'>
             <div className='messages-container'>
@@ -94,7 +101,7 @@
               <ol className='users'>{userListItems}</ol>
             </div>
             <form className='input-container' action='' onSubmit={this.handleSubmit}>
-              <strong><Nick user={this.state.user} />:&nbsp;</strong>
+              <strong><Nick user={this.me()} />:&nbsp;</strong>
               <input
                 type='text'
                 value={this.state.message}
@@ -109,6 +116,10 @@
             </form>
           </div>
         );
+      }
+
+      me() {
+        return this.state.users[this.state.nick] || { nick: '-', color: '#000' };
       }
 
       componentDidMount() {
@@ -145,12 +156,16 @@
       }
 
       onSocketError(data) {
-        console.error('Socket Error:', data);
+        console.error('error:', data);
       }
 
       onSocketUpdate(data) {
         console.log('update:', data);
-        console.log(this.state);
+        this.setState(data);
+      }
+
+      onSocketInit(data) {
+        console.log('init:', data);
         this.setState(data);
       }
 
