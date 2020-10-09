@@ -6,7 +6,7 @@ const { Server } = require('http');
 const SocketIO = require('socket.io'); // https://github.com/socketio/socket.io/blob/master/docs/README.md
 const morgan = require('morgan');
 const BodyParser = require('body-parser');
-const CookieParser = require('cookie-parser')
+const CookieParser = require('cookie-parser');
 const Redis = require('redis'); // https://github.com/NodeRedis/node_redis
 const RedisAdapter = require('socket.io-redis');
 require('bluebird').promisifyAll(Redis); // Monkey patches xxxAsync() for all xxx() -- https://github.com/NodeRedis/node_redis
@@ -15,10 +15,10 @@ const assert = require('assert');
 const crypto = require('crypto');
 
 assert([2,3].includes(process.argv.length));
-const port = process.argv[2] || 3000;
+const port = process.argv[2] || 3001;
 const app = Express();
 const server = Server(app);
-const REDIS_PORT = 6380
+const REDIS_PORT = 6379;
 const SESSION_COOKIE_NAME = 'connect.sid';
 const SESSION_SECRET = 'secrets';
 const redisClient = Redis.createClient(REDIS_PORT);
@@ -35,35 +35,35 @@ const session = Session({
 );
 const templates = {
   login: Handlebars.compile(fs.readFileSync(__dirname + '/login.html').toString()),
-}
+};
 let messageBuffer = [];
 
 /**
  * Inefficient way of establishing list of logged in users by enumerating sessions.
  */
-const users = new class {
+const users = new (class {
   constructor(sessionStore) {
-    this.sessionStore = sessionStore
+    this.sessionStore = sessionStore;
   }
 
   async getUsers() {
     let sessions = (await new Promise((resolve, reject) => {
-        this.sessionStore.all((err, sessions) => {
-          if(err) reject(err);
-          else resolve(sessions);
-        });
-    })).filter((v) => v.auth == 1).map((v) => { return { nick: v.nick, color: v.color, socket_id: v.socket_id } });
-    return sessions
+      this.sessionStore.all((err, sessions) => {
+        if(err) reject(err);
+        else resolve(sessions);
+      });
+    })).filter((v) => v.auth == 1).map((v) => { return { nick: v.nick, color: v.color, socket_id: v.socket_id }; });
+    return sessions;
   }
 
   async getNicks() {
-    return (await this.getUsers()).map((v) => v.nick)
+    return (await this.getUsers()).map((v) => v.nick);
   }
 
   async getUserByNick(nick) {
-    return (await this.getUsers()).filter((v) => v.nick == nick)[0]
+    return (await this.getUsers()).filter((v) => v.nick == nick)[0];
   }
-}(sessionStore)
+})(sessionStore);
 
 
 /**
@@ -72,11 +72,11 @@ const users = new class {
  */
 redisSub.on('message', (channel, message) => {
   switch(message) {
-    case 'expired':
-      console.log(`session expired: ${channel.split(':')[2]}`);
-      break;
-    default:
-      break;
+  case 'expired':
+    console.log(`session expired: ${channel.split(':')[2]}`);
+    break;
+  default:
+    break;
   }
 });
 
@@ -85,13 +85,13 @@ server.listen(port, () => {
 });
 
 app.use(morgan('common', { stream: { write: message => { console.info(message.trim(), { tags: 'http' }); } } }));
-app.use(session)
+app.use(session);
 app.use(BodyParser.json()); // support json encoded bodies
 app.use(BodyParser.urlencoded({ extended: true })); // support encoded bodies
 
 app.get('/login', (req, res) => {
   if(req.session.auth == 1) {
-    res.redirect(303, '/')
+    res.redirect(303, '/');
   }
   else {
     res.send(templates.login({}));
@@ -100,31 +100,31 @@ app.get('/login', (req, res) => {
 
 app.post('/login', async (req, res, next) => {
   try {
-    const regexp = /^\w[\w_-]{3,11}$/
-    const errors = []
+    const regexp = /^\w[\w_-]{3,11}$/;
+    const errors = [];
 
     if(!regexp.test(req.body.nick)) {
-      errors.push({ message: `Nick must match '${regexp}'` })
+      errors.push({ message: `Nick must match '${regexp}'` });
     }
     if(!errors.length && (await users.getNicks()).indexOf(req.body.nick) >= 0) {
-      errors.push({message: `Nick '${req.body.nick}' is already being used`})
+      errors.push({message: `Nick '${req.body.nick}' is already being used`});
     }
     if(!errors.length) {
-      login(req, io)
-      res.redirect(303, '/')
+      login(req, io);
+      res.redirect(303, '/');
     }
     else {
       res.send(templates.login({ errors: errors }));
     }
   }
   catch (err) {
-    next(err)
+    next(err);
   }
-})
+});
 
 app.get('/logout', (req, res, next) => {
-  console.log(`logout requested for ${req.session}`)
-  logout(req)
+  console.log(`logout requested for ${req.session}`);
+  logout(req);
   res.redirect(303, '/login');
 });
 
@@ -135,7 +135,7 @@ app.use(Express.static('app'));
  */
 app.use((req, res, next) => {
   if(req.session.auth == 1) {
-    next('route')
+    next('route');
   }
   else {
     res.redirect(303, '/login');
@@ -148,11 +148,11 @@ app.get('/', (req, res) => {
 });
 
 app.get('/users', async (req, res) => {
-  res.send(await users.getUsers())
+  res.send(await users.getUsers());
 });
 
 app.get('/ping', async (req, res) => {
-  res.send('pong')
+  res.send('pong');
 });
 
 
@@ -160,8 +160,8 @@ app.get('/ping', async (req, res) => {
  * Purge user login data.
  */
 async function logout(req) {
-  if(!req.session) return
-  req.session.destroy()
+  if(!req.session) return;
+  req.session.destroy();
   io.emit('update', { users: (await users.getUsers()) } );
 }
 
@@ -171,7 +171,7 @@ async function logout(req) {
 async function login(req, io) {
   req.session.auth = 1;
   req.session.nick = req.body.nick;
-  req.session.color = '#' + Math.random().toString().substring(2,8).toUpperCase()
+  req.session.color = '#' + Math.random().toString().substring(2,8).toUpperCase();
   io.emit('update', { users: (await users.getUsers()) } );
   redisSub.subscribe(`__keyspace@0__:sess:${req.session.id}`);
 }
@@ -209,7 +209,7 @@ io.engine.generateId = (req) => {
   cookieParser(req, null, () => {});
   console.log(req.cookies);
   return crypto.randomBytes(16).toString('hex');
-}
+};
 
 
 io.on('connection', (socket) => {
@@ -266,7 +266,7 @@ function authenticateConnection(socket, next) {
 
 function debugConnection(socket, next) {
   const { signedCookies, cookies } = socket.request;
-  console.log('signedCookies', signedCookies)
+  console.log('signedCookies', signedCookies);
   console.log('cookies', cookies);
   next();
 }
@@ -283,8 +283,7 @@ async function setSession(socket, next) {
     const sessionId = socket.conn.sessionId;
     const session = await new Promise((resolve, reject) => {
       sessionStore.get(sessionId, (err, session) => {
-        if(err) reject(err);
-        if(!session) reject(new Error('Undefined session'));
+        if(err || !session) reject(new Error('Undefined session'));
         resolve(session);
       });
     });
@@ -344,13 +343,13 @@ function chatMessage(socket, data) {
         message: data,
         timestamp: new Date().getTime(),
         user: { nick: session.nick, color: session.color },
-      }
+      };
       messageBuffer.push(payload);
       messageBuffer = messageBuffer.slice(-3, messageBuffer.length);
       io.emit('chat message', payload); // Emit to every connected socket
     }
   } catch(err) {
-    socket.emit('user error', { error: `Could not send message` });
+    socket.emit('user error', { error: 'Could not send message' });
   }
 }
 
@@ -361,16 +360,16 @@ async function directMessage(socket, data) {
   try {
     session.dm_count = session.dm_count ? session.dm_count + 1 : 1;
     saveSession(socket);
-    let user = (await users.getUserByNick(nick))
+    let user = (await users.getUserByNick(nick));
     if(!user) {
-      throw new Error('User does not exist')
+      throw new Error('User does not exist');
     }
     let payload = {
       message: message,
       timestamp: new Date().getTime(),
       user: { nick: session.nick, color: session.color },
       to: user,
-    }
+    };
     console.log(`direct message: @${session.nick}:`, data, user.socket_id);
     socket.emit('chat message', payload);
     socket.to(user.socket_id).emit('chat message', payload);
