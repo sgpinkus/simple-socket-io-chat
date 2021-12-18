@@ -14,18 +14,17 @@ require('bluebird').promisifyAll(Redis); // Monkey patches xxxAsync() for all xx
 const Handlebars = require('handlebars');
 const assert = require('assert');
 const crypto = require('crypto');
-
 assert([2,3].includes(process.argv.length));
-const PORT = process.argv[2] || 3001;
-const REDIS_PORT = 6380;
+const PORT = process.argv[2] || 3000;
+const REDIS_URL = 'redis://redis:6379';
 const SESSION_COOKIE_NAME = 'connect.sid';
 const SESSION_SECRET = 'secrets';
 const app = Express();
 const server = Server(app);
 
-const redisClient = Redis.createClient(REDIS_PORT);
-const redisSessionsSub = Redis.createClient(REDIS_PORT);
-const redisOnlineSub = Redis.createClient(REDIS_PORT);
+const redisClient = Redis.createClient(REDIS_URL);
+const redisSessionsSub = Redis.createClient(REDIS_URL);
+const redisOnlineSub = Redis.createClient(REDIS_URL);
 
 redisClient.config('set', 'notify-keyspace-events', 'EKx');
 
@@ -187,7 +186,7 @@ redisSessionsSub.on('message', (channel, message) => {
  * cookie (ignoring signature). See setSession().
  **************************************************************************************************/
 
-const redisAdaptor = RedisAdapter({ host: 'localhost', port: 6380 });
+const redisAdaptor = RedisAdapter(REDIS_URL);
 const io = SocketIO(server, {
   pingInterval: 10000,
   pingTimeout: 5000,
