@@ -1,21 +1,34 @@
 module.exports = {
-  'parser': 'babel-eslint',
   'env': {
     'es6': true,
     'node': true,
+    'mocha': true,
   },
   'extends': 'eslint:recommended',
   'parserOptions': {
     'ecmaFeatures': {
+      'jsx': true,
       'modules': true,
     },
+    'ecmaVersion': '2020',
   },
-  'rules': {
-    'indent': ['error', 2],
-    'quotes': ['error', 'single'],
-    'linebreak-style': ['error', 'unix'],
+  rules: {
+    'no-var': 'warn',
+    'eqeqeq': 'warn',
+    'keyword-spacing': 'error',
+    'handle-callback-err': 'error',
+    'no-console': 0,
+    'linebreak-style': 0,
+    'react/no-unescaped-entities': 0,
+    'quotes': [ 'error', 'single', { avoidEscape: true, allowTemplateLiterals: true } ],
     'semi': ['error', 'always'],
-    'no-unused-vars': 'off'
-    // 'no-console': ['error', { allow: ['warn', 'error', 'debug'] }],
+    'semi-spacing': 'error',
+    'spaced-comment': 0,
+    'vue/multi-word-component-names': 'off',
+    'comma-dangle': ['warn', 'always-multiline'],
+    'no-unused-vars': [
+      'warn',
+      { vars: 'all', args: 'all', argsIgnorePattern: '^_|this', ignoreRestSiblings: false },
+    ],
   },
 };

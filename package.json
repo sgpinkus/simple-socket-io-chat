@@ -4,8 +4,9 @@
   "description": "Does what ~WebSockets does but degrades to alternatives mechanism when WS is not available. Actually it's a level above WS providing a simple protocol for pub/sub like communications, connection lifecycle management and keepalive. Main features:",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "dev": "nodemon index.js"
+    "dev": "nodemon index.js",
+    "lint": "eslint",
+    "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
   "author": "",
@@ -25,7 +26,7 @@
     "socket.io-redis": "^5.4.0"
   },
   "devDependencies": {
-    "babel-eslint": "^10.1.0",
+    "@babel/eslint-parser": "^7.22.15",
     "eslint": "^8.51.0"
   }
 }

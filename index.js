@@ -35,7 +35,7 @@ const session = Session({
   resave: true,
   rolling: true, // Reset max age with each new client request.
   saveUninitialized: true,
-  cookie: { maxAge: 60000 }}
+  cookie: { maxAge: 60000 }},
 );
 const templates = {
   login: Handlebars.compile(fs.readFileSync(__dirname + '/login.html').toString()),
@@ -62,13 +62,13 @@ const Users = new (class {
   async getUsers() {
     let sessions = (await new Promise((resolve, reject) => {
       this.sessionStore.all((err, sessions) => {
-        if(err) reject(err);
+        if (err) reject(err);
         else resolve(sessions);
       });
     }))
       .filter((v) => v.auth === 1)
       .map((v) => lodash.pick(v, ['nick', 'color', 'socket_id']));
-    if(sessions.length)  {
+    if (sessions.length)  {
       let statuses = await this.redisClient.mgetAsync(sessions.map(u => `users:${u.nick}:status`));
       sessions = sessions.map((s, i) => ({ ...s, status: statuses[i] }));
     }
@@ -78,7 +78,7 @@ const Users = new (class {
 })(sessionStore, redisClient);
 
 app.get('/login', (req, res) => {
-  if(req.session.auth == 1) {
+  if (req.session.auth == 1) {
     res.redirect(303, '/');
   }
   else {
@@ -91,14 +91,14 @@ app.post('/login', async (req, res, next) => {
     const regexp = /^\w[\w_-]{3,11}$/;
     const errors = [];
 
-    if(!regexp.test(req.body.nick)) {
+    if (!regexp.test(req.body.nick)) {
       errors.push({ message: `Nick must match '${regexp}'` });
     }
     const nicks = Object.keys((await Users.getUsers()));
-    if(!errors.length && nicks.indexOf(req.body.nick) >= 0) {
+    if (!errors.length && nicks.indexOf(req.body.nick) >= 0) {
       errors.push({message: `Nick '${req.body.nick}' is already being used`});
     }
-    if(!errors.length) {
+    if (!errors.length) {
       login(req, io);
       res.redirect(303, '/');
     }
@@ -123,7 +123,7 @@ app.use(Express.static('app'));
  * Guarded end points.
  */
 app.use((req, res, next) => {
-  if(req.session.auth == 1) {
+  if (req.session.auth == 1) {
     next('route');
   }
   else {
@@ -147,7 +147,7 @@ app.get('/ping', async (req, res) => {
  * Purge user login data.
  */
 async function logout(req) {
-  if(!req.session) return;
+  if (!req.session) return;
   req.session.destroy();
   io.emit('update', { users: (await Users.getUsers()) } );
 }
@@ -168,7 +168,7 @@ async function login(req, io) {
  * storage user data and log the user out on session expiration.
  */
 redisSessionsSub.on('message', (channel, message) => {
-  if(message === 'expired') {
+  if (message === 'expired') {
     console.log(`session expired: ${channel.split(':')[2]}`);
   }
 });
@@ -230,7 +230,7 @@ async function initializeSocketSession(socket, next) {
     console.log(`initializeSocketSession() found sid=${sessionId}`);
     const session = await new Promise((resolve, reject) => {
       sessionStore.get(sessionId, (err, session) => {
-        if(err) reject(err);
+        if (err) reject(err);
         resolve(session);
       });
     });
@@ -240,7 +240,7 @@ async function initializeSocketSession(socket, next) {
     saveSession(socket);
     next();
   }
-  catch(err) {
+  catch (err) {
     console.error('No existing session was found for this connection. Please signin.');
     socket.disconnect(true);
     next(err);
@@ -253,7 +253,7 @@ async function initializeSocketSession(socket, next) {
  * each socket event.
  */
 function authenticateConnection(socket, next) {
-  if(!socket.conn.session || !(socket.conn.session.auth == 1)) {
+  if (!socket.conn.session || !(socket.conn.session.auth == 1)) {
     console.error('user not logged in');
     socket.disconnect(true);
     next(new Error('You are not logged in')); // This doesn't actually disconnect. Just sends 'error' back.
@@ -271,7 +271,7 @@ function authenticateConnection(socket, next) {
 async function initConnectedSocket(socket) {
   const users = await Users.getUsers();
   socket.emit('init', { nick: socket.conn.session.nick, users });
-  for(let message of messageBuffer) {
+  for (let message of messageBuffer) {
     socket.emit('chat message', message);
   }
 }
@@ -285,13 +285,13 @@ async function touchOnline(socket, next) {
     const k = `users:${session.nick}:status`;
     const status = await redisClient.getAsync(k);
     await redisClient.setAsync(k, 'online', 'EX', '15');
-    if(!status) {
+    if (!status) {
       io.emit('update', { users: (await Users.getUsers()) } );
     }
     console.log('touchOnline', k);
     next();
   }
-  catch(err) {
+  catch (err) {
     console.error(err);
     socket.disconnect(true);
     next(err);
@@ -310,7 +310,7 @@ async function setSession(socket, next) {
     const sessionId = socket.conn.sessionId;
     const session = await new Promise((resolve, reject) => {
       sessionStore.get(sessionId, (err, session) => {
-        if(err || !session) reject(new Error('Undefined session'));
+        if (err || !session) reject(new Error('Undefined session'));
         resolve(session);
       });
     });
@@ -318,7 +318,7 @@ async function setSession(socket, next) {
     console.log('setSession', session);
     next();
   }
-  catch(err) {
+  catch (err) {
     console.error('No session found for connection. Please sign in again.');
     socket.disconnect(true);
     next(err);
@@ -335,9 +335,9 @@ async function setSession(socket, next) {
  */
 function saveSession(socket) {
   const { sessionId, session } = socket.conn;
-  if(sessionId && session) {
+  if (sessionId && session) {
     sessionStore.set(sessionId, socket.conn.session, (err) => {
-      if(err) return console.error(`Failed to save session: ${err}`);
+      if (err) return console.error(`Failed to save session: ${err}`);
       console.log('saveSession');
     });
   }
@@ -349,10 +349,10 @@ function chatMessage(socket, data) {
   try {
     session.chat_count = session.chat_count ? session.chat_count + 1 : 1;
     saveSession(socket);
-    if(data.length == 0) {
+    if (data.length == 0) {
       io.emit('error', Error('Message has length of 0'));
     }
-    else if(data.length > 1000) {
+    else if (data.length > 1000) {
       io.emit('error', Error(`Message too big [${data.length}]`));
     }
     else {
@@ -366,7 +366,7 @@ function chatMessage(socket, data) {
       io.emit('chat message', payload); // Emit to every connected socket
       console.log(`chat message: @${session.nick}: ${data}`);
     }
-  } catch(err) {
+  } catch (err) {
     socket.emit('user error', { error: 'Could not send message' });
   }
 }
@@ -379,7 +379,7 @@ async function directMessage(socket, data) {
     session.dm_count = session.dm_count ? session.dm_count + 1 : 1;
     saveSession(socket);
     let user = (await Users.getUsers())[nick];
-    if(!user) {
+    if (!user) {
       throw new Error('User does not exist');
     }
     let payload = {
@@ -392,7 +392,7 @@ async function directMessage(socket, data) {
     socket.emit('chat message', payload);
     socket.to(user.socket_id).emit('chat message', payload);
   }
-  catch(err) {
+  catch (err) {
     socket.emit('user error', { error: `Could not send direct message to ${nick}` });
   }
 }
