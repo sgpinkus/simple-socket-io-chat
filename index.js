@@ -6,7 +6,6 @@ const ConnectRedis = require('connect-redis')(Session); // https://github.com/tj
 const { Server } = require('http');
 const SocketIO = require('socket.io'); // https://github.com/socketio/socket.io/blob/master/docs/README.md
 const morgan = require('morgan');
-const BodyParser = require('body-parser');
 const CookieParser = require('cookie-parser');
 const Redis = require('redis'); // https://github.com/NodeRedis/node_redis
 const RedisAdapter = require('socket.io-redis');
@@ -48,8 +47,8 @@ server.listen(PORT, () => {
 });
 app.use(morgan('common', { stream: { write: message => { console.info(message.trim(), { tags: 'http' }); } } }));
 app.use(session);
-app.use(BodyParser.json()); // support json encoded bodies
-app.use(BodyParser.urlencoded({ extended: true })); // support encoded bodies
+app.use(Express.urlencoded({ limit: '1MB' }));
+app.use(Express.json({ type: '*/*', limit: '1MB' }));
 
 /**
  * Logged in users service. Thin wrapper over session store to enumerate logged in user sessions.
