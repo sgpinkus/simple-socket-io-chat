@@ -69,9 +69,9 @@ See [namespace.clients](https://github.com/socketio/socket.io/blob/master/docs/A
 
 ## Implementation Review
 
-  - Structure would be nicer and up performance if we used simple create-react-app as template basis and did a server side preprocessing build. That's easy enough and worth the effort in IRL.
   - Sharing a session between socket.io and Express is a bit icky. The session can expire according to Express but still be valid according to socket.io unless we explicitly reimplement the session expiration logic in the socket.io middleware - which we don't. Implemented fix is to just keep the session alive so long as there is a live socket.io connection by doing a custom ping to touch the shared session.
   - Not well tested but seems to work.
+  - IRL we'd use webpack or something.
 
 [socket.io]: https://github.com/socketio/socket.io/blob/master/docs/README.md
 [so1]: https://stackoverflow.com/questions/25532692/how-to-share-sessions-with-socket-io-1-x-and-express-4-x?noredirect=1&lq=1

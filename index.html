@@ -77,7 +77,7 @@
         this.onSocketInit = this.onSocketInit.bind(this);
         this.onSocketUpdate = this.onSocketUpdate.bind(this);
         this.onSocketChatMessage = this.onSocketChatMessage.bind(this);
-        this.socket = io();
+        this.socket = io('ws://127.0.0.1:3000/', { transports: ['websocket'] });
         this.socket.on('connect', this.onSocketConnect);
         this.socket.on('disconnect', this.onSocketDisconnect);
         this.socket.on('error', this.onSocketError);

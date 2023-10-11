@@ -1,8 +1,9 @@
-FROM node:14.15.3-buster-slim
+FROM node:16.18-buster-slim
 ENV DOCKER=true
 WORKDIR /var/www/app
 COPY package.json .
-COPY yarn.lock .
-RUN yarn install --ignore-scripts
+COPY package-lock.json .
+COPY .npmrc .
+RUN npm i
 COPY . .
-CMD [ "node", "index.js" ]
+ENTRYPOINT ["npm", "run"]

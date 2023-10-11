@@ -1,0 +1,13 @@
+node_modules/
+conf/
+dist/
+docker-compose-*
+Dockerfile*
+.env*
+.npm/
+.git/
+.config/
+.vscode/
+.cache/
+.node_repl_history
+
