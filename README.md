@@ -19,10 +19,10 @@ This is a simple chat app developed as a personal learning aid following on from
     - Limit the size of messages front-end and back-end.
   - [x] **Dynamically update list of users online** Store and show the list of users that are online. When a user is inactive to more then 2 minutes automatically log the user out. The nick is made available again.
   - [x] **Use single page in-browser React component for Front end.**
-  - [x] **Use ExpressJS for the backend.**
+  - [x] **Use Express nad Express-Session for the backend.**
   - [x] **Add direct 1to1 private directs messaging (DM)** Use the main messaging pane to display DMs but make sure the DMs are clearly distinguishable.
-  - ~[ ] **Use Redis for the main message channel and DMs.** Such that there is one global Redis server and many socket.io servers each serving a set of user and basically proxying messages to/from Redis channels.~. Meh.
-  - ~[ ] **Proper login with persistent backend.**~. Meh.
+  - [x] **Use Redis backend**
+  - ~~[ ] **Proper login with persistent backend.**~~ (Meh).
 
 ## Implementation Notes
 

@@ -15,12 +15,12 @@
     .main-container { display:flex; flex-flow: column wrap; height: 100%; }
     .messages-container { flex: 1; display:flex; flex-flow: row wrap;}
     .messages { flex: 1; width: 100%; overflow-y: scroll; }
-    .users { padding: 0 0.5em; margin: 0; }
-    .input-container { max-height: 40px; min-height: 1.5em; display:flex; flex-flow: row nowrap; }
+    .users, .messages, .input-container { padding: 0 0.2em; margin: 0; }
+    .input-container { max-height: 40px; min-height: 1.5em; display:flex; flex-flow: row nowrap; border-top: solid 1px #000; }
     .input { flex: 1; }
-    .messages, .users { border: solid 1px #000; }
-    .users, .messages { list-style-type: none; list-style-position: outside; }
-    .message-username { padding-right: 0.5em; }
+    .users { border-left: solid 1px #000 }
+    .users, .messages { list-style-type: none; list-style-position: outside; min-width: 60px; }
+    .message-username { padding-right: 0.2em; }
     </style>
   </head>
   <body>
@@ -38,11 +38,11 @@
     <script type="text/babel">
 
     function Message(props) {
-      let { user, message, to } = props;
+      let { user = 'unknown', message, to } = props;
       let { timestamp, text } = message;
       if(to) {
         return <li className='message' >
-          <span>{new Date(timestamp).toLocaleTimeString()}</span>&nbsp;<Nick user={user} /> -> <Nick user={to} />:&nbsp;<span className='message-body'>{text}</span>
+          <span>{new Date(timestamp).toLocaleTimeString()}</span>&nbsp;<Nick user={user} /> -&gt; <Nick user={to} />:&nbsp;<span className='message-body'>{text}</span>
         </li>
       }
       else {
@@ -73,13 +73,15 @@
         this.handleChange = this.handleChange.bind(this);
         this.onSocketConnect = this.onSocketConnect.bind(this);
         this.onSocketDisconnect = this.onSocketDisconnect.bind(this);
+        this.onSocketConnectError = this.onSocketConnectError.bind(this);
         this.onSocketError = this.onSocketError.bind(this);
         this.onSocketInit = this.onSocketInit.bind(this);
         this.onSocketUpdate = this.onSocketUpdate.bind(this);
         this.onSocketChatMessage = this.onSocketChatMessage.bind(this);
-        this.socket = io('ws://127.0.0.1:3000/', { transports: ['websocket'] });
+        this.socket = io(window.location.toString(), { transports: ['websocket'] });
         this.socket.on('connect', this.onSocketConnect);
         this.socket.on('disconnect', this.onSocketDisconnect);
+        this.socket.on('connect_error', this.onSocketConnectError);
         this.socket.on('error', this.onSocketError);
         this.socket.on('update', this.onSocketUpdate);
         this.socket.on('init', this.onSocketInit);
@@ -88,10 +90,12 @@
       }
 
       render() {
-        const messageListItems = this.state.messages.map((message, index) => {
-          const to = this.state.users[message.to];
-          const user = this.state.users[message.user];
-          return <Message to={to} user={user} message={message} key={index} />;
+        const messageListItems = this.state.messages
+          .filter(m => m.user in this.state.users)
+          .map((message, index) => {
+            const to = this.state.users[message.to];
+            const user = this.state.users[message.user];
+            return <Message to={to} user={user} message={message} key={index} />;
         })
         const userListItems = Object.values(this.state.users).map((user) => <UserStatus user={user} key={user.nick} />)
         return (
@@ -152,7 +156,11 @@
 
       onSocketDisconnect(data) {
         console.log('disconnected');
-        setTimeout(() => window.location = '/', 2000);
+        setTimeout(() => window.location = '/', 3000);
+      }
+
+      onSocketConnectError(data) {
+        console.error('connect_error:', data);
       }
 
       onSocketError(data) {

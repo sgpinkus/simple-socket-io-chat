@@ -56,6 +56,7 @@ const server = Server(app);
     saveUninitialized: true,
     cookie: { maxAge: 15000 }},
   ));
+  // app.use(CookieParser(SESSION_SECRET));
   app.use(Express.urlencoded({ limit: '1MB', extended: true }));
   app.use(Express.json({ type: '*/*', limit: '1MB' }));
 
@@ -121,11 +122,26 @@ const server = Server(app);
 
   app.use(Express.static('app'));
 
+  // app.get('*', function (req, res) {
+  //   console.log(req.query, typeof(req.query));
+  //   res.json({
+  //     req: {
+  //       method: req.method,
+  //       path: req.path,
+  //       query: req.query,
+  //       headers: req.headers,
+  //     },
+  //     res: {
+  //       headers: res.headers,
+  //     },
+  //   });
+  // });
+
   /**
    * Guarded end points.
    */
   app.use((req, res, next) => {
-    if (req.session.auth == 1) {
+    if (req.session.auth === 1) {
       next('route');
     }
     else {
@@ -173,7 +189,7 @@ const server = Server(app);
    *
    * Sessions: We can access the Express session in a socket but the session middleware isn't invoked
    * the same as in Express, and it's dodgy. So using custom session access based off express-session
-   * cookie (ignoring signature). See setSession().
+   * cookie (ignoring signature). See setSessionObject().
    **************************************************************************************************/
 
   const redisAdaptor = SocketIORedisAdapter.createAdapter(redisClient, redisSubscriberClient);
@@ -183,9 +199,8 @@ const server = Server(app);
     adapter: redisAdaptor,
   });
   const cookieParser = CookieParser(SESSION_SECRET);
-  let custom_id=0;
-
   io.use((socket, next) => cookieParser(socket.request, {}, next));
+
   io.use(initializeSocketSession);
   io.use(authenticateConnection);
 
@@ -196,7 +211,7 @@ const server = Server(app);
 
   io.on('connection', (socket) => {
     console.log(`new socket connection: id=${socket.id}`);
-    socket.use((packet, next) => setSession(socket, next));
+    socket.use((packet, next) => setSessionObject(socket, next));
     socket.use((packet, next) => touchOnline(socket, next));
     socket.on('chat message', (message) => chatMessage(socket, message));
     socket.on('direct message', (message) => directMessage(socket, message));
@@ -227,7 +242,7 @@ const server = Server(app);
         });
       });
       session.socket_id = socket.id;
-      socket.conn.sessionId = sessionId;
+      socket.data.sessionId = sessionId; // See setSessionObject()
       socket.conn.session = session;
       saveSession(socket);
       next();
@@ -297,9 +312,9 @@ const server = Server(app);
    * Invoking it with each packet does not work either. This is the only robust solution I've found.
    * Precondition: initializeSocketSession.
    */
-  async function setSession(socket, next) {
+  async function setSessionObject(socket, next) {
     try {
-      const sessionId = socket.conn.sessionId;
+      const sessionId = socket.data.sessionId;
       const session = await new Promise((resolve, reject) => {
         sessionStore.get(sessionId, (err, session) => {
           if (err || !session) reject(new Error('Undefined session'));
@@ -307,7 +322,7 @@ const server = Server(app);
         });
       });
       socket.conn.session = session;
-      console.log('setSession', session);
+      console.log('setSessionObject', session);
       next();
     }
     catch (err) {
